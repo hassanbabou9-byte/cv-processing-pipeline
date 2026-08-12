@@ -9,33 +9,9 @@ Enterprise-oriented AI pipeline for automated CV ingestion, extraction, validati
 - [Overview](#overview)
 - [Objectives](#objectives)
 - [Architecture](#architecture)
-- [Complete Processing Flow](#complete-processing-flow)
-- [LLM Data Flow](#llm-data-flow)
-- [Technologies](#technologies)
-- [Project Structure](#project-structure)
-- [Prerequisites](#prerequisites)
 - [Installation](#installation)
-- [Environment Configuration](#environment-configuration)
-- [LLM Providers](#llm-providers)
-- [Database](#database)
-- [Database Architecture](#database-architecture)
-- [API](#api)
-- [Batch Upload](#batch-upload)
-- [Processing 100 CVs](#processing-100-cvs)
-- [CV Extraction Schema](#cv-extraction-schema)
-- [Pydantic Validation](#pydantic-validation)
-- [Normalization](#normalization)
-- [ORM Mapping](#orm-mapping)
-- [Repository Layer](#repository-layer)
-- [Error Handling](#error-handling)
-- [Testing](#testing)
-- [Running the Project](#running-the-project)
-- [Collaborator Setup](#collaborator-setup)
-- [Git Workflow](#git-workflow)
-- [Development Rules](#development-rules)
-- [Troubleshooting](#troubleshooting)
-- [Current Status](#current-status)
-- [Future Improvements](#future-improvements)
+
+
 
 ---
 
@@ -60,38 +36,91 @@ The project supports:
 - PostgreSQL persistence
 - Per-CV error isolation
 
-The main pipeline is:
+---
+# installation
+Python 3.11+
+PostgreSQL
+Git
+Ollama (optional fallback provider) 
+
+# Objectives
+
+The main objectives of the project are:
+
+- Automate CV document processing.
+- Extract structured information from unstructured CVs.
+- Process multiple CVs through a single API request.
+- Process each CV independently.
+- Prevent one failed CV from stopping the entire batch.
+- Validate LLM-generated information before persistence.
+- Separate extraction, validation, normalization, mapping, and persistence.
+- Store structured CV information in PostgreSQL.
+
+---
+
+# Architecture
 
 ```text
-CV (PDF / DOCX)
-       |
-       v
-    Docling
-       |
-       v
- Clean Markdown
-       |
-       v
- System Prompt + CV Markdown
-       |
-       v
-      LLM
-(OpenRouter → Ollama fallback)
-       |
-       v
- Structured JSON
-       |
-       v
- Pydantic Validation
-       |
-       v
-   Normalization
-       |
-       v
-    ORM Mapping
-       |
-       v
-    Repository
-       |
-       v
-   PostgreSQL
+                         +----------------------+
+                         |        Client        |
+                         |   Swagger / Postman  |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         |       FastAPI        |
+                         |      API Layer       |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         |  Processing Service  |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         |       Docling        |
+                         |  PDF / DOCX Parsing  |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         |   Cleaned Markdown   |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         |    LLM Extraction    |
+                         | OpenRouter / Ollama  |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         |  Structured JSON     |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         | Pydantic Validation  |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         |     Normalizer       |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         |      DB Mapper       |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         |     Repository       |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         |     PostgreSQL       |
+                         +----------------------+
+                        
