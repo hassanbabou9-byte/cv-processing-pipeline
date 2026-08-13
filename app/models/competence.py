@@ -5,7 +5,7 @@ Competence model — master dictionary of skills/languages.
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, Index, String, func
+from sqlalchemy import Enum, Index, String, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,7 +23,7 @@ class Competence(Base):
     __table_args__ = (
         Index(
             "ix_competences_nom_lower",
-            func.lower("nom"),
+            text("lower(nom)"),
             unique=True,
         ),
     )

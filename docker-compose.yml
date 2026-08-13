@@ -1,0 +1,110 @@
+services:
+
+  # ============================================================
+  # PostgreSQL
+  # ============================================================
+
+  postgres:
+    image: postgres:18-alpine
+
+    container_name: cv-pipeline-postgres
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cv_pipeline}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-cv_pipeline}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    networks:
+      - cv_pipeline_network
+
+
+  # ============================================================
+  # FastAPI CV Processing Pipeline
+  # ============================================================
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: cv-pipeline-api
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+
+      # --------------------------------------------------------
+      # PostgreSQL connection
+      # --------------------------------------------------------
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-cv_pipeline}
+
+      # --------------------------------------------------------
+      # Ollama
+      #
+      # If Ollama is running on the Windows host:
+      # host.docker.internal points to the host machine.
+      # --------------------------------------------------------
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+    volumes:
+      # Persist uploaded CVs and parsed Markdown.
+      - ./data:/app/data
+
+      # Persist Docling/model caches.
+      - docling_cache:/root/.cache
+
+    networks:
+      - cv_pipeline_network
+
+
+# ==============================================================
+# Volumes
+# ==============================================================
+
+volumes:
+
+  postgres_data:
+    name: cv-pipeline-postgres-data
+
+  docling_cache:
+    name: cv-pipeline-docling-cache
+
+
+# ==============================================================
+# Network
+# ==============================================================
+
+networks:
+
+  cv_pipeline_network:
+    name: cv-pipeline-network
+    driver: bridge

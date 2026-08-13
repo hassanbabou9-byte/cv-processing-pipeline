@@ -1,31 +1,29 @@
 # ==============================================================
 # CV Processing Pipeline — Python Dependencies
-# Python 3.12+
 # ==============================================================
 
-# --- Backend ---
+# Backend
 fastapi
 uvicorn[standard]
-python-multipart          # required by FastAPI for file uploads (UploadFile)
+python-multipart
 
-# --- AI / LLM orchestration ---
+# AI / LLM orchestration
 langchain
 langchain-core
-langchain-community        # provider integrations, output parsers, community tools
-langchain-openai            # OpenAI-compatible client, used for OpenRouter (OpenAI-compatible API)
-langchain-ollama             # native Ollama integration for LangChain
+langchain-community
+langchain-openai
+langchain-ollama
 
-# --- Document processing ---
+# Document processing
 docling
 
-# --- Validation ---
+# Validation
 pydantic
 pydantic-settings
 
-# --- Database ---
+# Database
 sqlalchemy
+psycopg[binary]
 
-psycopg[binary]              # PostgreSQL driver (psycopg 3)
-
-# --- Configuration ---
+# Configuration
 python-dotenv
