@@ -771,6 +771,9 @@ Collaborateur (1) ────── (N) Experience
 | `bio_professionnelle` | TEXT | NULL |
 | `role` | VARCHAR | DEFAULT 'COLLABORATEUR' |
 | `statut` | VARCHAR | DEFAULT 'ACTIF' |
+| `image_object_key` | VARCHAR | NULL; MinIO object key |
+
+`image_object_key` references the candidate image stored in the configured MinIO bucket. The image bytes are not stored in PostgreSQL. It is `NULL` when the CV has no usable candidate image.
 
 #### `experiences` (Professional Experience)
 
