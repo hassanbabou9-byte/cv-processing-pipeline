@@ -7,13 +7,14 @@ OpenAPI/Swagger configuration.
 """
 
 from contextlib import asynccontextmanager
+
 import logging
 
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 from app.api.error_handlers import register_exception_handlers
-from app.api.routers import process, upload
+from app.api.routers import candidates, process, upload
 from app.config.settings import get_settings
 from app.core.logging import setup_logging
 from app.db.init_db import init_db
@@ -28,7 +29,6 @@ logger = logging.getLogger(__name__)
 # ==============================================================
 
 settings = get_settings()
-
 
 setup_logging(
     settings.log_level
@@ -111,12 +111,19 @@ register_exception_handlers(
 # Routers
 # ==============================================================
 
+# CV upload / batch processing
 app.include_router(
     upload.router
 )
 
+# CV processing
 app.include_router(
     process.router
+)
+
+# Candidate retrieval
+app.include_router(
+    candidates.router
 )
 
 
@@ -138,7 +145,6 @@ def custom_openapi() -> dict:
     """
 
     if app.openapi_schema:
-
         return app.openapi_schema
 
     openapi_schema = get_openapi(
@@ -147,7 +153,9 @@ def custom_openapi() -> dict:
         description=(
             "Enterprise CV Processing Pipeline.\n\n"
             "Upload up to 100 CV files per request. "
-            "Each CV is processed independently."
+            "Each CV is processed independently.\n\n"
+            "Candidate information is stored in PostgreSQL "
+            "and candidate images are stored in MinIO."
         ),
         routes=app.routes,
     )

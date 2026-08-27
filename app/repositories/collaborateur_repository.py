@@ -9,6 +9,13 @@ Collaborateurs are resolved by email before insertion so that
 processing the same CV more than once does not create duplicate
 collaborateur rows.
 
+If an existing Collaborateur is found:
+
+    - extracted CV information is updated
+    - existing Collaborateur ID is preserved
+    - existing image is preserved when the new CV has no image
+    - image_object_key is replaced when the new CV contains an image
+
 Collaborateur IDs use the required format:
 
     a1000001-0000-0000-0000-000000000001
@@ -18,12 +25,17 @@ Collaborateur IDs use the required format:
 The ID allocation is protected by a PostgreSQL transaction-level
 advisory lock so it remains safe when multiple CVs are persisted
 concurrently.
+
+Candidate images are stored in MinIO.
+PostgreSQL stores only the MinIO object key.
+
+The repository itself does NOT communicate with MinIO.
 """
 
 import logging
 import uuid
 
-from sqlalchemy import text, select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
@@ -43,14 +55,6 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # PostgreSQL advisory-lock key
-# ---------------------------------------------------------------------------
-#
-# This is only used to serialize collaborator ID allocation and duplicate
-# email checks.
-#
-# It does NOT lock the entire CV-processing pipeline.
-#
-# Docling and LLM processing can therefore still run concurrently.
 # ---------------------------------------------------------------------------
 
 _COLLABORATEUR_LOCK_KEY = 735291
@@ -81,8 +85,8 @@ class CollaborateurRepository:
         The lock is automatically released when the current transaction
         commits or rolls back.
 
-        This guarantees that two concurrent requests cannot allocate the
-        same Collaborateur sequence number.
+        This guarantees that two concurrent requests cannot allocate
+        the same Collaborateur sequence number.
         """
 
         try:
@@ -122,25 +126,9 @@ class CollaborateurRepository:
         Only IDs matching the required format are considered:
 
             a1000001-0000-0000-0000-XXXXXXXXXXXX
-
-        The caller must hold the Collaborateur advisory lock before
-        invoking this method.
         """
 
         try:
-
-            # PostgreSQL UUID values are converted to text so that we can
-            # extract the final 12 hexadecimal characters.
-            #
-            # Example:
-            #
-            # a1000001-0000-0000-0000-000000000017
-            #
-            # becomes:
-            #
-            # 000000000017
-            #
-            # which is converted from hexadecimal to an integer.
 
             result = self._db.execute(
                 text(
@@ -250,6 +238,83 @@ class CollaborateurRepository:
             ) from exc
 
     # =======================================================================
+    # Update existing Collaborateur
+    # =======================================================================
+
+    def _update_existing_collaborateur(
+        self,
+        existing: Collaborateur,
+        mapped: MappedCV,
+    ) -> Collaborateur:
+        """
+        Update an existing Collaborateur from a newly mapped CV.
+
+        Important image rule:
+
+            new CV contains image
+                -> replace image_object_key
+
+            new CV contains no image
+                -> preserve existing image_object_key
+
+        The actual MinIO object replacement/deletion is handled by the
+        CV processing service. This repository only updates PostgreSQL.
+        """
+
+        incoming = mapped.collaborateur
+
+        # ---------------------------------------------------------------
+        # Personal information
+        # ---------------------------------------------------------------
+
+        existing.nom = incoming.nom
+        existing.prenom = incoming.prenom
+        existing.email = incoming.email
+
+        # ---------------------------------------------------------------
+        # Professional information
+        # ---------------------------------------------------------------
+
+        existing.telephone_professionnel = (
+            incoming.telephone_professionnel
+        )
+
+        existing.bio_professionnelle = (
+            incoming.bio_professionnelle
+        )
+
+        existing.role = incoming.role
+        existing.statut = incoming.statut
+
+        # ---------------------------------------------------------------
+        # Image
+        # ---------------------------------------------------------------
+        #
+        # Only replace the image reference when the new CV actually
+        # contains an image.
+        #
+        # If the new CV has no image, preserve the old image.
+        # ---------------------------------------------------------------
+
+        if incoming.image_object_key:
+
+            existing.image_object_key = (
+                incoming.image_object_key
+            )
+
+        logger.info(
+            (
+                "Updated existing Collaborateur: "
+                "id=%s email=%s image=%s"
+            ),
+            existing.id,
+            existing.email,
+            existing.image_object_key or "none",
+        )
+
+        return existing
+
+    # =======================================================================
     # Save
     # =======================================================================
 
@@ -258,16 +323,20 @@ class CollaborateurRepository:
         mapped: MappedCV,
     ) -> Collaborateur:
         """
-        Persist the complete CV graph.
+        Persist the complete mapped CV.
 
-        Duplicate handling:
+        Behavior:
 
             email
               ↓
             acquire database lock
               ↓
             existing?
-              ├── YES → return existing row
+              ├── YES
+              │     ├── update candidate information
+              │     ├── replace image reference if new image exists
+              │     └── preserve image if new CV has no image
+              │
               └── NO
                     ↓
               allocate Collaborateur UUID
@@ -276,17 +345,11 @@ class CollaborateurRepository:
                     ↓
               attach relationships
                     ↓
-              insert graph
+              insert complete graph
                     ↓
               commit
 
-        The advisory lock protects both:
-
-            1. duplicate email detection
-            2. Collaborateur ID allocation
-
-        This makes the operation safe when multiple CVs are persisted
-        concurrently.
+        The repository never communicates with MinIO.
         """
 
         try:
@@ -297,12 +360,6 @@ class CollaborateurRepository:
 
             # ===============================================================
             # 1. Acquire transaction-level lock
-            # ===============================================================
-            #
-            # This is intentionally done only here, immediately before
-            # database persistence.
-            #
-            # Docling and LLM processing remain outside this lock.
             # ===============================================================
 
             self._acquire_collaborateur_lock()
@@ -335,17 +392,38 @@ class CollaborateurRepository:
 
             if existing is not None:
 
-                logger.info(
-                    (
-                        "Collaborateur already exists. "
-                        "Skipping duplicate insertion: "
-                        "email=%s id=%s"
-                    ),
-                    existing.email,
-                    existing.id,
+                # -----------------------------------------------------------
+                # Update existing candidate.
+                # -----------------------------------------------------------
+
+                updated = (
+                    self._update_existing_collaborateur(
+                        existing,
+                        mapped,
+                    )
                 )
 
-                return existing
+                # -----------------------------------------------------------
+                # Commit update.
+                # -----------------------------------------------------------
+
+                self._db.commit()
+
+                self._db.refresh(
+                    updated
+                )
+
+                logger.info(
+                    (
+                        "Existing Collaborateur updated successfully: "
+                        "id=%s email=%s image=%s"
+                    ),
+                    updated.id,
+                    updated.email,
+                    updated.image_object_key or "none",
+                )
+
+                return updated
 
             # ===============================================================
             # 4. Allocate required Collaborateur UUID
@@ -401,16 +479,18 @@ class CollaborateurRepository:
 
             logger.info(
                 (
-                    "Persisted Collaborateur "
-                    "id=%s email=%s"
+                    "Persisted new Collaborateur: "
+                    "id=%s email=%s image=%s"
                 ),
                 collaborateur.id,
                 collaborateur.email,
+                collaborateur.image_object_key or "none",
             )
 
             return collaborateur
 
         except RepositoryError:
+
             self._db.rollback()
             raise
 

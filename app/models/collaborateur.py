@@ -6,6 +6,9 @@ Main candidate/employee profile.
 The database specification does not define emplois, fonctions,
 or entites tables, therefore this model contains no references
 to those entities.
+
+Candidate images are stored in MinIO.
+PostgreSQL stores only the MinIO object key.
 """
 
 import uuid
@@ -31,6 +34,10 @@ if TYPE_CHECKING:
 class Collaborateur(Base):
     __tablename__ = "collaborateurs"
 
+    # ================================================================
+    # Identity
+    # ================================================================
+
     id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         primary_key=True,
@@ -42,6 +49,10 @@ class Collaborateur(Base):
         nullable=False,
         default=0,
     )
+
+    # ================================================================
+    # Personal information
+    # ================================================================
 
     nom: Mapped[str] = mapped_column(
         String,
@@ -69,6 +80,10 @@ class Collaborateur(Base):
         nullable=True,
     )
 
+    # ================================================================
+    # Professional information
+    # ================================================================
+
     role: Mapped[str] = mapped_column(
         String,
         nullable=False,
@@ -80,6 +95,31 @@ class Collaborateur(Base):
         nullable=False,
         default="ACTIF",
     )
+
+    # ================================================================
+    # Candidate image
+    # ================================================================
+    #
+    # The actual image is stored in MinIO.
+    #
+    # PostgreSQL stores only the object key.
+    #
+    # Example:
+    #
+    # candidates/
+    #   <cv_id>/
+    #       photo.png
+    #
+    # ================================================================
+
+    image_object_key: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    # ================================================================
+    # Relationships
+    # ================================================================
 
     experiences: Mapped[list["Experience"]] = relationship(
         back_populates="collaborateur",

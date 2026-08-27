@@ -7,6 +7,9 @@ The mapper does NOT access the database.
 
 Shared competence resolution is performed later by
 CollaborateurRepository / CompetenceRepository.
+
+Candidate images are stored in MinIO.
+Only the MinIO object key is stored in the Collaborateur entity.
 """
 
 from dataclasses import dataclass, field
@@ -49,15 +52,24 @@ class MappedCV:
     )
 
 
-def map_to_entities(normalized: NormalizedCV) -> MappedCV:
+def map_to_entities(
+    normalized: NormalizedCV,
+    image_object_key: str | None = None,
+) -> MappedCV:
     """
     Convert normalized CV data into SQLAlchemy entities.
 
-    IMPORTANT:
-        Competence objects are NOT attached to their junction rows here.
+    Parameters
+    ----------
+    normalized:
+        Normalized CV data.
 
-        CompetenceRepository must first determine whether each competence
-        already exists in the database.
+    image_object_key:
+        Optional MinIO object key for the candidate image.
+
+    The mapper does not communicate with MinIO.
+    It only stores the already-resolved object key
+    on the Collaborateur entity.
     """
 
     n = normalized.collaborateur
@@ -76,6 +88,7 @@ def map_to_entities(normalized: NormalizedCV) -> MappedCV:
         bio_professionnelle=n.bio_professionnelle,
         role=n.role,
         statut=n.statut,
+        image_object_key=image_object_key,
     )
 
     # ================================================================
@@ -141,23 +154,11 @@ def map_to_entities(normalized: NormalizedCV) -> MappedCV:
             niveau=normalized_competence.niveau,
         )
 
-        # VERY IMPORTANT:
-        #
-        # Do NOT do:
-        #
-        #     link.competence = competence
-        #
-        # here.
-        #
-        # The competence is resolved by CompetenceRepository first.
+        # CompetenceRepository resolves the competence later.
 
         new_competences.append(competence)
         competence_links.append(link)
 
-    # Attach junction rows to collaborateur.
-    #
-    # They currently have no competence assigned.
-    # The repository will assign the resolved competence later.
     collaborateur.competences = competence_links
 
     # ================================================================

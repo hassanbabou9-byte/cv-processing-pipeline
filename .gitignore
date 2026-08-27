@@ -64,4 +64,11 @@ htmlcov/
 # ==============================================================
 
 .cache/
-.huggingface/git rev-parse --show-toplevel
+.huggingface/
+
+# Runtime CV data
+data/uploads/
+data/parsed/
+
+# Extracted test images
+extracted_candidate.*

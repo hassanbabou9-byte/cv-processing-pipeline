@@ -1,6 +1,6 @@
 # CV Processing Pipeline
 
-**Enterprise-grade AI-powered CV processing system** for automated ingestion, extraction, validation, and persistence of candidate information from PDF/DOCX documents.
+**AI-powered CV processing system** for uploading PDF/DOCX resumes, extracting structured candidate data, validating it, and storing it in PostgreSQL.
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-v0.100%2B-green) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-blue) ![Docker](https://img.shields.io/badge/Docker-Supported-blue)
 
@@ -15,6 +15,7 @@
 - [Installation & Setup](#installation--setup)
 - [Configuration](#configuration)
 - [Docker Deployment](#docker-deployment)
+- [Streamlit Frontend](#streamlit-frontend)
 - [API Documentation](#api-documentation)
 - [Database Schema](#database-schema)
 - [Project Structure](#project-structure)
@@ -46,6 +47,76 @@ PostgreSQL Persistence
 ```
 
 **Key Design Principle:** Each CV is processed independently — a failure on one CV does not stop the pipeline for others in the batch.
+
+---
+
+## Quick Start
+
+The easiest way to run the complete project is Docker Compose. Docker starts the API, PostgreSQL, and MinIO together.
+
+### Prerequisites
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) with Compose enabled
+- An LLM provider: an [OpenRouter](https://openrouter.ai/) API key or a local [Ollama](https://ollama.com/) installation
+- Git
+
+### 1. Clone the repository
+
+```bash
+git clone <repository-url>
+cd cv-pipline
+```
+
+### 2. Create the local environment file
+
+Copy the committed template and update the values marked for your environment. Do not commit `.env`; it contains credentials and is ignored by Git.
+
+```powershell
+# Windows PowerShell
+Copy-Item .env.example .env
+```
+
+```bash
+# macOS/Linux
+cp .env.example .env
+```
+
+At minimum, set `POSTGRES_PASSWORD`, `MINIO_ROOT_PASSWORD`, and `MINIO_SECRET_KEY` to non-default values. Choose one LLM option:
+
+- **OpenRouter:** set `LLM_PROVIDER=openrouter` and provide `OPENROUTER_API_KEY`.
+- **Ollama:** install Ollama, pull the model named by `OLLAMA_MODEL`, and keep `LLM_PROVIDER=ollama`.
+
+### 3. Start the services
+
+```bash
+docker compose up --build
+```
+
+The first build can take several minutes because Docling downloads model files. When startup completes, use:
+
+- API: <http://localhost:8000>
+- Swagger UI: <http://localhost:8000/docs>
+- ReDoc: <http://localhost:8000/redoc>
+- MinIO Console: <http://localhost:9001>
+
+### 4. Start the frontend
+
+Open a second terminal, activate a Python environment, install the dependencies, and run:
+
+```bash
+python -m pip install -r requirements.txt
+python -m streamlit run frontend/app.py
+```
+
+Then open <http://localhost:8501>. The frontend uses the API at `http://127.0.0.1:8000`.
+
+### 5. Stop the project
+
+```bash
+docker compose down
+```
+
+Use `docker compose down -v` only when you intentionally want to delete the PostgreSQL, MinIO, and Docling cache volumes.
 
 ---
 
@@ -221,8 +292,8 @@ source venv/bin/activate
 ### Step 3: Install Dependencies
 
 ```bash
-pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
 ### Step 4: Configure Environment Variables
@@ -244,19 +315,30 @@ POSTGRES_PASSWORD=postgres
 POSTGRES_PORT=5432
 
 # LLM Provider Selection
-LLM_PRIMARY_PROVIDER=openrouter  # or: ollama
-LLM_FALLBACK_PROVIDER=ollama     # or: openrouter
+LLM_PROVIDER=ollama              # or: openrouter
+LLM_TEMPERATURE=0.0
+LLM_MAX_RETRIES=2
+LLM_TIMEOUT_SECONDS=60
+LLM_PARSE_RETRIES=2
+LLM_MAX_OUTPUT_TOKENS=4096
+LLM_CONTEXT_WINDOW=8192
 
 # OpenRouter (if using as primary)
-OPENROUTER_API_KEY=sk_live_...
-OPENROUTER_MODEL=anthropic/claude-3-5-sonnet
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MODEL=openai/gpt-4o-mini
 
 # Ollama (if using as primary or fallback)
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama2
+OLLAMA_MODEL=llama3.1
+
+# MinIO object storage
+MINIO_ENDPOINT=localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET=candidate-images
+MINIO_SECURE=false
 
 # FastAPI
-API_HOST=0.0.0.0
 API_PORT=8000
 ```
 
@@ -277,10 +359,7 @@ The database is automatically initialized on application startup via `app/db/ini
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The API will be available at:
-- **http://localhost:8000**
-- **Swagger UI:** http://localhost:8000/docs
-- **ReDoc:** http://localhost:8000/redoc
+The API will be available at `http://localhost:8000`. Open `/docs` for the interactive Swagger UI or `/redoc` for ReDoc.
 
 ---
 
@@ -309,20 +388,35 @@ The API will be available at:
 
 #### LLM Provider Configuration
 
-| Variable | Options | Description |
+| Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_PRIMARY_PROVIDER` | `openrouter`, `ollama` | Primary LLM provider |
-| `LLM_FALLBACK_PROVIDER` | `openrouter`, `ollama` | Fallback provider (if primary fails) |
-| `OPENROUTER_API_KEY` | - | API key for OpenRouter |
-| `OPENROUTER_MODEL` | - | OpenRouter model identifier |
-| `OLLAMA_BASE_URL` | http://localhost:11434 | Ollama server URL |
-| `OLLAMA_MODEL` | - | Ollama model name |
+| `LLM_PROVIDER` | `ollama` | LLM provider: `ollama` or `openrouter` |
+| `LLM_TEMPERATURE` | `0.0` | Sampling temperature |
+| `LLM_MAX_RETRIES` | `2` | Provider request retries |
+| `LLM_TIMEOUT_SECONDS` | `60` | Provider request timeout |
+| `LLM_PARSE_RETRIES` | `2` | Retries for malformed extraction output |
+| `LLM_MAX_OUTPUT_TOKENS` | `4096` | Maximum extraction response size |
+| `LLM_CONTEXT_WINDOW` | `8192` | LLM context window size |
+| `OPENROUTER_API_KEY` | - | API key when using OpenRouter |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter API base URL |
+| `OPENROUTER_MODEL` | `openai/gpt-4o-mini` | OpenRouter model identifier |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | `llama3.1` | Ollama model name |
+
+#### MinIO Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MINIO_ENDPOINT` | `minio:9000` | MinIO host and port inside Docker |
+| `MINIO_ACCESS_KEY` | `minioadmin` | MinIO access key |
+| `MINIO_SECRET_KEY` | `minioadmin` | MinIO secret key |
+| `MINIO_BUCKET` | `candidate-images` | Bucket for candidate images |
+| `MINIO_SECURE` | `false` | Use HTTPS for MinIO connections |
 
 #### API Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `API_HOST` | 0.0.0.0 | Server host binding |
 | `API_PORT` | 8000 | Server port |
 
 ### Provider Selection Strategy
@@ -340,9 +434,10 @@ The system supports two LLM providers with automatic failover:
    - Lower latency, full data privacy
    - Requires Ollama server running
 
-**Failover Logic:**
-- If primary provider fails, the system automatically retries with the fallback provider
-- If both fail, the request returns an error with details
+**Retry behavior:**
+- The configured provider is retried when a request fails
+- Malformed extraction output is retried according to `LLM_PARSE_RETRIES`
+- If extraction still fails, the request returns an error with details
 
 ---
 
@@ -353,21 +448,23 @@ The system supports two LLM providers with automatic failover:
 #### 1. Start All Services
 
 ```bash
-docker-compose up -d
+docker compose up --build -d
 ```
 
 This starts:
 - **PostgreSQL** database (port 5432)
+- **MinIO** object storage API (port 9000)
+- **MinIO Console** (port 9001)
 - **FastAPI** application (port 8000)
 
 #### 2. Verify Deployment
 
 ```bash
 # Check running containers
-docker-compose ps
+docker compose ps
 
 # View logs
-docker-compose logs -f api
+docker compose logs -f api
 ```
 
 #### 3. Access the API
@@ -376,14 +473,16 @@ docker-compose logs -f api
 - **Swagger UI:** http://localhost:8000/docs
 - **ReDoc:** http://localhost:8000/redoc
 - **PostgreSQL:** localhost:5432
+- **MinIO API:** http://localhost:9000
+- **MinIO Console:** http://localhost:9001
 
 #### 4. Stop Services
 
 ```bash
-docker-compose down
+docker compose down
 
 # Also remove volumes (WARNING: deletes data)
-docker-compose down -v
+docker compose down -v
 ```
 
 ### Docker Compose Environment
@@ -394,6 +493,7 @@ The `docker-compose.yml` includes:
 - **FastAPI Container** (built from Dockerfile)
 - **Persistent Volumes:** Data and Docling caches
 - **Health Checks:** PostgreSQL readiness verification
+- **MinIO Object Storage:** Candidate images are stored in the `candidate-images` bucket
 - **Network Isolation:** Custom bridge network
 
 ### Docker Configuration Notes
@@ -418,6 +518,20 @@ docker run -p 8000:8000 \
 ```
 
 ---
+
+## Streamlit Frontend
+
+The Streamlit frontend provides a browser-based view of candidates and communicates with FastAPI over HTTP. It does not connect directly to PostgreSQL or MinIO.
+
+Start the API first, then run the frontend from the project root:
+
+```bash
+python -m streamlit run frontend/app.py
+```
+
+Open the URL printed by Streamlit, usually `http://localhost:8501`. The frontend expects the API at `http://127.0.0.1:8000`; update `API_BASE_URL` in `frontend/app.py` when the API runs elsewhere.
+
+  ---
 
 ## API Documentation
 
@@ -555,6 +669,36 @@ Content-Type: application/json
 curl -X POST "http://localhost:8000/process/4c2c0210-647a-4ae1-83ed-78f84dd18c71" \
   -H "Content-Type: application/json"
 ```
+
+---
+
+#### 3. **List Candidates**
+
+```http
+GET /candidates?limit=100&offset=0
+```
+
+Returns candidates stored in PostgreSQL. `limit` must be between 1 and 500; `offset` defaults to 0.
+
+```bash
+curl "http://localhost:8000/candidates?limit=20&offset=0"
+```
+
+#### 4. **Get Candidate**
+
+```http
+GET /candidates/{collaborateur_id}
+```
+
+Returns one candidate by UUID.
+
+#### 5. **Get Candidate Image**
+
+```http
+GET /candidates/{collaborateur_id}/image
+```
+
+Streams the candidate image from MinIO when an image is available.
 
 ---
 
@@ -885,7 +1029,7 @@ createdb cv_pipeline
 **Option B: Docker PostgreSQL**
 ```bash
 # Use Docker Compose to run only PostgreSQL
-docker-compose up -d postgres
+docker compose up -d postgres
 
 # Update .env:
 DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/cv_pipeline
@@ -895,7 +1039,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/cv_pipeline
 
 **For OpenRouter:**
 ```env
-LLM_PRIMARY_PROVIDER=openrouter
+LLM_PROVIDER=openrouter
 OPENROUTER_API_KEY=sk_live_...
 OPENROUTER_MODEL=anthropic/claude-3-5-sonnet
 ```
@@ -907,7 +1051,7 @@ ollama pull llama2
 ollama serve
 
 # In .env:
-LLM_PRIMARY_PROVIDER=ollama
+LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama2
 ```
@@ -1036,7 +1180,7 @@ sqlalchemy.exc.OperationalError: (psycopg.OperationalError) connection failed
 - Verify PostgreSQL is running: `psql --version`
 - Check `DATABASE_URL` in `.env` matches your setup
 - Ensure credentials are correct: `postgres:password@localhost:5432/cv_pipeline`
-- If using Docker: `docker-compose ps` and check container health
+- If using Docker: `docker compose ps` and check container health
 
 ```bash
 # Test connection
@@ -1119,8 +1263,8 @@ API_PORT=8001
 
 **Or use different compose file:**
 ```bash
-docker-compose down
-docker-compose up -d
+docker compose down
+docker compose up -d
 ```
 
 #### 7. **Out of Memory (Docker)**
@@ -1140,7 +1284,7 @@ docker run --memory=4g cv-pipeline:latest
 
 1. **Check logs:**
    ```bash
-   docker-compose logs -f api
+  docker compose logs -f api
    # or locally:
    python -m uvicorn app.main:app --reload --log-level debug
    ```

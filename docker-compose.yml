@@ -6,9 +6,7 @@ services:
 
   postgres:
     image: postgres:18-alpine
-
     container_name: cv-pipeline-postgres
-
     restart: unless-stopped
 
     environment:
@@ -20,6 +18,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
 
     volumes:
+      # PostgreSQL 18+ expects the mount at /var/lib/postgresql
       - postgres_data:/var/lib/postgresql
 
     healthcheck:
@@ -27,6 +26,50 @@ services:
         [
           "CMD-SHELL",
           "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-cv_pipeline}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    networks:
+      - cv_pipeline_network
+
+
+  # ============================================================
+  # MinIO Object Storage
+  # ============================================================
+
+  minio:
+    image: minio/minio:latest
+    container_name: cv-pipeline-minio
+    restart: unless-stopped
+
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+    ports:
+      # S3 API
+      - "9000:9000"
+
+      # MinIO Web Console
+      - "9001:9001"
+
+    volumes:
+      - minio_data:/data
+
+    command:
+      - server
+      - /data
+      - --console-address
+      - ":9001"
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -f http://localhost:9000/minio/health/live || exit 1"
         ]
       interval: 5s
       timeout: 5s
@@ -47,7 +90,6 @@ services:
       dockerfile: Dockerfile
 
     container_name: cv-pipeline-api
-
     restart: unless-stopped
 
     env_file:
@@ -58,28 +100,58 @@ services:
       # --------------------------------------------------------
       # PostgreSQL connection
       # --------------------------------------------------------
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-cv_pipeline}
+
+      DATABASE_URL: >-
+        postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-cv_pipeline}
 
       # --------------------------------------------------------
       # Ollama
       #
-      # If Ollama is running on the Windows host:
-      # host.docker.internal points to the host machine.
+      # Ollama is running on the Windows host.
+      # host.docker.internal allows the API container
+      # to communicate with the host machine.
       # --------------------------------------------------------
+
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
 
+      # --------------------------------------------------------
+      # MinIO
+      #
+      # IMPORTANT:
+      # Inside Docker, use the service name "minio",
+      # NOT localhost.
+      # --------------------------------------------------------
+
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-candidate-images}
+      MINIO_SECURE: ${MINIO_SECURE:-false}
+
     depends_on:
+
       postgres:
+        condition: service_healthy
+
+      minio:
         condition: service_healthy
 
     ports:
       - "${API_PORT:-8000}:8000"
 
     volumes:
+
+      # --------------------------------------------------------
+      # Application data
+      # --------------------------------------------------------
+
       # Persist uploaded CVs and parsed Markdown.
       - ./data:/app/data
 
-      # Persist Docling/model caches.
+      # --------------------------------------------------------
+      # Docling / model cache
+      # --------------------------------------------------------
+
       - docling_cache:/root/.cache
 
     networks:
@@ -97,6 +169,9 @@ volumes:
 
   docling_cache:
     name: cv-pipeline-docling-cache
+
+  minio_data:
+    name: cv-pipeline-minio-data
 
 
 # ==============================================================
