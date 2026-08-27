@@ -531,7 +531,27 @@ python -m streamlit run frontend/app.py
 
 Open the URL printed by Streamlit, usually `http://localhost:8501`. The frontend expects the API at `http://127.0.0.1:8000`; update `API_BASE_URL` in `frontend/app.py` when the API runs elsewhere.
 
-  ---
+---
+
+## Candidate Image Extraction
+
+When a CV contains an embedded candidate photo, the processing pipeline:
+
+1. Extracts usable embedded images from PDF or DOCX files.
+2. Ignores images smaller than the minimum supported dimensions.
+3. Prefers an image containing a face when one is detected.
+4. Falls back to the largest usable image when no face is detected.
+5. Uploads the selected image to the configured MinIO bucket.
+
+Image extraction is optional. A CV without a usable photo is still processed successfully. PostgreSQL stores the MinIO object key in the candidate record; the image bytes remain in MinIO.
+
+Retrieve an image through the API:
+
+```http
+GET /candidates/{collaborateur_id}/image
+```
+
+The Streamlit frontend displays the image through this API endpoint and does not access MinIO directly.
 
 ## API Documentation
 
